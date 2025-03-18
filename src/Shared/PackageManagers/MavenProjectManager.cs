@@ -7,6 +7,7 @@ namespace Microsoft.CST.OpenSource.PackageManagers
     using Microsoft.CST.OpenSource.Contracts;
     using Microsoft.CST.OpenSource.Extensions;
     using Microsoft.CST.OpenSource.Model;
+    using Microsoft.CST.OpenSource.Model.Enums;
     using Microsoft.CST.OpenSource.PackageActions;
     using PackageUrl;
     using System;
@@ -27,8 +28,8 @@ namespace Microsoft.CST.OpenSource.PackageManagers
 
         public override string ManagerType => Type;
 
-        public const string DEFAULT_MAVEN_ENDPOINT = "https://repo1.maven.org/maven2";
-        public string ENV_MAVEN_ENDPOINT { get; set; } = DEFAULT_MAVEN_ENDPOINT;
+        public const MavenSupportUpstream DEFAULT_MAVEN_ENDPOINT = MavenSupportUpstream.MavenCentralRepository;
+        public MavenSupportUpstream ENV_MAVEN_ENDPOINT { get; set; } = DEFAULT_MAVEN_ENDPOINT;
 
         public MavenProjectManager(
             string directory,
@@ -45,7 +46,7 @@ namespace Microsoft.CST.OpenSource.PackageManagers
             string? packageNamespace = Check.NotNull(nameof(purl.Namespace), purl?.Namespace).Replace('.', '/');
             string? packageName = Check.NotNull(nameof(purl.Name), purl?.Name);
             string? packageVersion = Check.NotNull(nameof(purl.Version), purl?.Version);
-            string feedUrl = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT).EnsureTrailingSlash();
+            string feedUrl = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT.GetRepositoryUrl()).EnsureTrailingSlash();
 
             HttpClient httpClient = CreateHttpClient();
             string baseUrl = $"{feedUrl}{packageNamespace}/{packageName}/{packageVersion}/";
@@ -144,7 +145,7 @@ namespace Microsoft.CST.OpenSource.PackageManagers
             }
             string packageNamespace = purl.Namespace.Replace('.', '/');
             string packageName = purl.Name;
-            string feedUrl = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT).EnsureTrailingSlash();
+            string feedUrl = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT.GetRepositoryUrl()).EnsureTrailingSlash();
             HttpClient httpClient = CreateHttpClient();
 
             return await CheckHttpCacheForPackage(httpClient, $"{feedUrl}{packageNamespace}/{packageName}/maven-metadata.xml", useCache);
@@ -162,7 +163,7 @@ namespace Microsoft.CST.OpenSource.PackageManagers
             {
                 string packageNamespace = purl.Namespace.Replace('.', '/');
                 string packageName = purl.Name;
-                string feedUrl = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT).EnsureTrailingSlash();
+                string feedUrl = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT.GetRepositoryUrl()).EnsureTrailingSlash();
                 HttpClient httpClient = CreateHttpClient();
 
                 string? content = await GetHttpStringCache(httpClient, $"{feedUrl}{packageNamespace}/{packageName}/", useCache);
@@ -171,11 +172,11 @@ namespace Microsoft.CST.OpenSource.PackageManagers
                 {
                     return new List<string>();
                 }
-                
+
                 // Parse the html file.
                 HtmlParser parser = new();
                 AngleSharp.Html.Dom.IHtmlDocument document = await parser.ParseDocumentAsync(content);
-                
+
                 // Break the version content down into its individual lines. Includes the parent directory and xml + hash files.
                 IEnumerable<string> htmlEntries = document.QuerySelector("#contents").QuerySelectorAll("a").Select(a => a.TextContent);
 
@@ -215,7 +216,7 @@ namespace Microsoft.CST.OpenSource.PackageManagers
             {
                 string packageNamespace = purl.Namespace.Replace('.', '/');
                 string packageName = purl.Name;
-                string feedUrl = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT).EnsureTrailingSlash();
+                string feedUrl = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT.GetRepositoryUrl()).EnsureTrailingSlash();
                 HttpClient httpClient = CreateHttpClient();
 
                 string? content = await GetHttpStringCache(httpClient, $"{feedUrl}{packageNamespace}/{packageName}/{purl.Version}/", useCache);
@@ -245,7 +246,7 @@ namespace Microsoft.CST.OpenSource.PackageManagers
             {
                 string? packageNamespace = purl?.Namespace?.Replace('.', '/');
                 string? packageName = purl?.Name;
-                string feedUrl = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT).EnsureTrailingSlash();
+                string feedUrl = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT.GetRepositoryUrl()).EnsureTrailingSlash();
                 HttpClient httpClient = CreateHttpClient();
                 if (purl?.Version == null)
                 {
@@ -276,7 +277,7 @@ namespace Microsoft.CST.OpenSource.PackageManagers
             PackageMetadata metadata = new();
             metadata.Name = purl.GetFullName();
             metadata.PackageVersion = purl?.Version;
-            metadata.PackageManagerUri = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT).EnsureTrailingSlash();
+            metadata.PackageManagerUri = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT.GetRepositoryUrl()).EnsureTrailingSlash();
             metadata.Platform = "Maven";
             metadata.Language = "Java";
 
@@ -289,7 +290,7 @@ namespace Microsoft.CST.OpenSource.PackageManagers
         {
             string? packageNamespace = purl?.Namespace?.Replace('.', '/');
             string? packageName = purl?.Name;
-            string feedUrl = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT).EnsureTrailingSlash();
+            string feedUrl = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT.GetRepositoryUrl()).EnsureTrailingSlash();
 
             return new Uri($"{feedUrl}{packageNamespace}/{packageName}");
         }
@@ -324,7 +325,7 @@ namespace Microsoft.CST.OpenSource.PackageManagers
             string? packageNamespace = Check.NotNull(nameof(purl.Namespace), purl?.Namespace).Replace('.', '/');
             string? packageName = Check.NotNull(nameof(purl.Name), purl?.Name);
             string? packageVersion = Check.NotNull(nameof(purl.Version), purl?.Version);
-            string feedUrl = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT).EnsureTrailingSlash();
+            string feedUrl = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT.GetRepositoryUrl()).EnsureTrailingSlash();
 
             HttpClient httpClient = CreateHttpClient();
             string baseUrl = $"{feedUrl}{packageNamespace}/{packageName}/";
