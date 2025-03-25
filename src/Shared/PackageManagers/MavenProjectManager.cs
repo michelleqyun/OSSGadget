@@ -28,8 +28,8 @@ namespace Microsoft.CST.OpenSource.PackageManagers
 
         public override string ManagerType => Type;
 
-        public const MavenSupportUpstream DEFAULT_MAVEN_ENDPOINT = MavenSupportUpstream.MavenCentralRepository;
-        public MavenSupportUpstream ENV_MAVEN_ENDPOINT { get; set; } = DEFAULT_MAVEN_ENDPOINT;
+        public const MavenSupportedUpstream DEFAULT_MAVEN_ENDPOINT = MavenSupportedUpstream.MavenCentralRepository;
+        public MavenSupportedUpstream ENV_MAVEN_ENDPOINT { get; set; } = DEFAULT_MAVEN_ENDPOINT;
 
         public MavenProjectManager(
             string directory,
@@ -216,10 +216,25 @@ namespace Microsoft.CST.OpenSource.PackageManagers
             {
                 string packageNamespace = purl.Namespace.Replace('.', '/');
                 string packageName = purl.Name;
-                string feedUrl = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT.GetRepositoryUrl()).EnsureTrailingSlash();
+                string feedUrl = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT.GetRepositoryUrl());
+                MavenSupportedUpstream upstream = feedUrl.GetMavenSupportedUpstream();
+
                 HttpClient httpClient = CreateHttpClient();
 
-                string? content = await GetHttpStringCache(httpClient, $"{feedUrl}{packageNamespace}/{packageName}/{purl.Version}/", useCache);
+                string packageRepositoryCheckUri = string.Empty;
+                if (upstream == MavenSupportedUpstream.MavenCentralRepository)
+                {
+                    packageRepositoryCheckUri = $"{upstream.GetRepositoryUrl().EnsureTrailingSlash()}{packageNamespace}/{packageName}/{purl.Version}/";
+                }
+                if (upstream == MavenSupportedUpstream.GoogleMavenRepository)
+                {
+                    packageRepositoryCheckUri = $"{upstream.GetRepositoryUrl()}{packageNamespace}:{packageName}:{purl.Version}";
+                }
+
+                // https://repo1.maven.org/maven2/academy/alex/custommatcher/1.0/
+                // https://maven.google.com/web/index.html#android.arch.core:common:1.1.
+
+                string? content = await GetHttpStringCache(httpClient, packageRepositoryCheckUri, useCache);
                 if (string.IsNullOrWhiteSpace(content))
                 {
                     return false;
