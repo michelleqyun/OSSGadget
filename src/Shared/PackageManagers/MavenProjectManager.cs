@@ -214,7 +214,6 @@ namespace Microsoft.CST.OpenSource.PackageManagers
             }
             try
             {
-                string packageNamespace = purl.Namespace.Replace('.', '/');
                 string packageName = purl.Name;
                 string feedUrl = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT.GetRepositoryUrl());
                 MavenSupportedUpstream upstream = feedUrl.GetMavenSupportedUpstream();
@@ -224,11 +223,16 @@ namespace Microsoft.CST.OpenSource.PackageManagers
                 string packageRepositoryCheckUri = string.Empty;
                 if (upstream == MavenSupportedUpstream.MavenCentralRepository)
                 {
+                    string packageNamespace = purl.Namespace.Replace('.', '/');
                     packageRepositoryCheckUri = $"{upstream.GetRepositoryUrl().EnsureTrailingSlash()}{packageNamespace}/{packageName}/{purl.Version}/";
                 }
                 if (upstream == MavenSupportedUpstream.GoogleMavenRepository)
                 {
-                    packageRepositoryCheckUri = $"{upstream.GetRepositoryUrl()}{packageNamespace}:{packageName}:{purl.Version}";
+                    packageRepositoryCheckUri = $"{upstream.GetRepositoryUrl()}{purl.Namespace}:{packageName}:{purl.Version}";
+                }
+                else
+                {
+                    throw new ArgumentException($"Unexpected upstream: {upstream}");
                 }
 
                 // https://repo1.maven.org/maven2/academy/alex/custommatcher/1.0/
