@@ -69,7 +69,9 @@ public static class MavenSupportUpstreamExtensions
     /// <exception cref="ArgumentOutOfRangeException"></exception>
     public static MavenSupportedUpstream GetMavenSupportedUpstream(this string mavenUpstream) => mavenUpstream switch
     {
+        "MavenCentralRepository" => MavenSupportedUpstream.MavenCentralRepository,
         "https://repo1.maven.org/maven2" => MavenSupportedUpstream.MavenCentralRepository,
+        "GoogleMavenRepository" => MavenSupportedUpstream.GoogleMavenRepository,
         "https://dl.google.com/android/maven2" => MavenSupportedUpstream.GoogleMavenRepository,
         "https://plugins.gradle.org/m2" => MavenSupportedUpstream.GradlePluginsRepository, // michelleqyun: verify
         "https://jitpack.io" => MavenSupportedUpstream.JitPackRepository, // michelleqyun: verify
