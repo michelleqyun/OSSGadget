@@ -43,13 +43,29 @@ namespace Microsoft.CST.OpenSource.PackageManagers
         /// <inheritdoc />
         public override async IAsyncEnumerable<ArtifactUri<MavenArtifactType>> GetArtifactDownloadUrisAsync(PackageURL purl, bool useCache = true)
         {
-            string? packageNamespace = Check.NotNull(nameof(purl.Namespace), purl?.Namespace).Replace('.', '/');
             string? packageName = Check.NotNull(nameof(purl.Name), purl?.Name);
             string? packageVersion = Check.NotNull(nameof(purl.Version), purl?.Version);
-            string feedUrl = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT.GetRepositoryUrl()).EnsureTrailingSlash();
+            string feedUrl = purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT.GetRepositoryUrl();
+            MavenSupportedUpstream upstream = feedUrl.GetMavenSupportedUpstream();
 
             HttpClient httpClient = CreateHttpClient();
-            string baseUrl = $"{feedUrl}{packageNamespace}/{packageName}/{packageVersion}/";
+
+            string baseUrl = string.Empty;
+            if (upstream == MavenSupportedUpstream.MavenCentralRepository) // michelleqyun: consider switch statement
+            {
+                string? packageNamespace = Check.NotNull(nameof(purl.Namespace), purl?.Namespace).Replace('.', '/');
+                baseUrl = $"{upstream.GetRepositoryUrl().EnsureTrailingSlash()}{packageNamespace}/{packageName}/{packageVersion}/";
+            }
+            else if (upstream == MavenSupportedUpstream.GoogleMavenRepository)
+            {
+                string packageNamespace = purl.Namespace ?? String.Empty;
+                baseUrl = $"{upstream.GetRepositoryUrl().EnsureTrailingSlash()}{packageNamespace}:{packageName}:{purl.Version}";
+            }
+            else // michelleqyun: eventually default to maven central
+            {
+                throw new ArgumentException($"Unexpected upstream: {upstream}");
+            }
+
             string? html = await GetHttpStringCache(httpClient, baseUrl, useCache);
             if (string.IsNullOrEmpty(html))
             {
@@ -58,12 +74,24 @@ namespace Microsoft.CST.OpenSource.PackageManagers
 
             HtmlParser parser = new();
             AngleSharp.Html.Dom.IHtmlDocument document = await parser.ParseDocumentAsync(html);
-            foreach (string fileName in document.QuerySelectorAll("a").Select(link => link.GetAttribute("href").ToString()))
-            {
-                if (fileName == "../") continue;
 
-                MavenArtifactType artifactType = GetMavenArtifactType(fileName);
-                yield return new ArtifactUri<MavenArtifactType>(artifactType, baseUrl + fileName);
+            if (upstream == MavenSupportedUpstream.MavenCentralRepository)
+            {
+                foreach (string fileName in document.QuerySelectorAll("a").Select(link => link.GetAttribute("href").ToString()))
+                {
+                    if (fileName == "../") continue;
+
+                    MavenArtifactType artifactType = GetMavenArtifactType(fileName);
+                    yield return new ArtifactUri<MavenArtifactType>(artifactType, baseUrl + fileName);
+                }
+            }
+            else if (upstream == MavenSupportedUpstream.GoogleMavenRepository)
+            {
+
+            }
+            else // michelleqyun: eventually default to maven central
+            {
+                throw new ArgumentException($"Unexpected upstream: {upstream}");
             }
         }
 
@@ -134,7 +162,7 @@ namespace Microsoft.CST.OpenSource.PackageManagers
             return downloadedPaths;
         }
 
-        /// <inheritdoc />
+        /// <inheritdoc /> michelleqyun: to do
         public override async Task<bool> PackageExistsAsync(PackageURL purl, bool useCache = true)
         {
             Logger.Trace("PackageExists {0}", purl?.ToString());
@@ -215,22 +243,23 @@ namespace Microsoft.CST.OpenSource.PackageManagers
             try
             {
                 string packageName = purl.Name;
-                string feedUrl = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT.GetRepositoryUrl());
+                string feedUrl = purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT.GetRepositoryUrl();
                 MavenSupportedUpstream upstream = feedUrl.GetMavenSupportedUpstream();
 
                 HttpClient httpClient = CreateHttpClient();
 
                 string packageRepositoryCheckUri = string.Empty;
-                if (upstream == MavenSupportedUpstream.MavenCentralRepository)
+                if (upstream == MavenSupportedUpstream.MavenCentralRepository) // michelleqyun: consider switch statement
                 {
                     string packageNamespace = purl.Namespace.Replace('.', '/');
                     packageRepositoryCheckUri = $"{upstream.GetRepositoryUrl().EnsureTrailingSlash()}{packageNamespace}/{packageName}/{purl.Version}/";
                 }
-                if (upstream == MavenSupportedUpstream.GoogleMavenRepository)
+                else if (upstream == MavenSupportedUpstream.GoogleMavenRepository)
                 {
-                    packageRepositoryCheckUri = $"{upstream.GetRepositoryUrl()}{purl.Namespace}:{packageName}:{purl.Version}";
+                    string packageNamespace = purl.Namespace ?? String.Empty;
+                    packageRepositoryCheckUri = $"{upstream.GetRepositoryUrl()}{packageNamespace}:{packageName}:{purl.Version}";
                 }
-                else
+                else // michelleqyun: eventually default to maven central
                 {
                     throw new ArgumentException($"Unexpected upstream: {upstream}");
                 }
@@ -263,22 +292,51 @@ namespace Microsoft.CST.OpenSource.PackageManagers
         {
             try
             {
-                string? packageNamespace = purl?.Namespace?.Replace('.', '/');
                 string? packageName = purl?.Name;
-                string feedUrl = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT.GetRepositoryUrl()).EnsureTrailingSlash();
+                string feedUrl = purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT.GetRepositoryUrl();
+                MavenSupportedUpstream upstream = feedUrl.GetMavenSupportedUpstream();
+
                 HttpClient httpClient = CreateHttpClient();
+
                 if (purl?.Version == null)
                 {
                     foreach (string? version in await EnumerateVersionsAsync(purl, useCache))
                     {
-                        return await GetHttpStringCache(httpClient, $"{feedUrl}{packageNamespace}/{packageName}/{version}/{packageName}-{version}.pom", useCache);
+                        if (upstream == MavenSupportedUpstream.MavenCentralRepository) // michelleqyun: consider switch statement
+                        {
+                            string? packageNamespace = purl?.Namespace?.Replace('.', '/');
+                            return await GetHttpStringCache(httpClient, $"{upstream.GetDownloadRepositoryUrl().EnsureTrailingSlash()}{packageNamespace}/{packageName}/{version}/{packageName}-{version}.pom", useCache);
+                        }
+                        else if (upstream == MavenSupportedUpstream.GoogleMavenRepository)
+                        {
+                            string packageNamespace = purl.Namespace ?? String.Empty;
+                            return await GetHttpStringCache(httpClient, $"{upstream.GetDownloadRepositoryUrl()}{packageNamespace}/{packageName}/{version}/{packageName}-{version}.pom", useCache);
+                        }
+                        else // michelleqyun: eventually default to maven central
+                        {
+                            throw new ArgumentException($"Unexpected upstream: {upstream}");
+                        }
                     }
                     throw new Exception("No version specified and unable to enumerate.");
                 }
                 else
                 {
                     string version = purl.Version;
-                    return await GetHttpStringCache(httpClient, $"{feedUrl}{packageNamespace}/{packageName}/{version}/{packageName}-{version}.pom", useCache);
+
+                    if (upstream == MavenSupportedUpstream.MavenCentralRepository) // michelleqyun: consider switch statement
+                    {
+                        string? packageNamespace = purl?.Namespace?.Replace('.', '/');
+                        return await GetHttpStringCache(httpClient, $"{upstream.GetDownloadRepositoryUrl().EnsureTrailingSlash()}{packageNamespace}/{packageName}/{version}/{packageName}-{version}.pom", useCache);
+                    }
+                    else if (upstream == MavenSupportedUpstream.GoogleMavenRepository)
+                    {
+                        string packageNamespace = purl.Namespace ?? String.Empty;
+                        return await GetHttpStringCache(httpClient, $"{upstream.GetDownloadRepositoryUrl()}{packageNamespace}/{packageName}/{version}/{packageName}-{version}.pom", useCache);
+                    }
+                    else // michelleqyun: eventually default to maven central
+                    {
+                        throw new ArgumentException($"Unexpected upstream: {upstream}");
+                    }
                 }
             }
             catch (Exception ex)
@@ -341,14 +399,31 @@ namespace Microsoft.CST.OpenSource.PackageManagers
 
         private async Task<DateTime?> GetPackagePublishDateAsync(PackageURL purl, bool useCache = true)
         {
-            string? packageNamespace = Check.NotNull(nameof(purl.Namespace), purl?.Namespace).Replace('.', '/');
             string? packageName = Check.NotNull(nameof(purl.Name), purl?.Name);
             string? packageVersion = Check.NotNull(nameof(purl.Version), purl?.Version);
-            string feedUrl = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT.GetRepositoryUrl()).EnsureTrailingSlash();
+            string feedUrl = purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT.GetRepositoryUrl();
+            MavenSupportedUpstream upstream = feedUrl.GetMavenSupportedUpstream();
 
             HttpClient httpClient = CreateHttpClient();
-            string baseUrl = $"{feedUrl}{packageNamespace}/{packageName}/";
-            string? html = await GetHttpStringCache(httpClient, baseUrl, useCache);
+
+            string html = string.Empty;
+            if (upstream == MavenSupportedUpstream.MavenCentralRepository) // michelleqyun: consider switch statement
+            {
+                string? packageNamespace = Check.NotNull(nameof(purl.Namespace), purl?.Namespace).Replace('.', '/');
+                string baseUrl = $"{upstream.GetRepositoryUrl().EnsureTrailingSlash()}{packageNamespace}/{packageName}/";
+                html = await GetHttpStringCache(httpClient, baseUrl, useCache);
+            }
+            else if (upstream == MavenSupportedUpstream.GoogleMavenRepository)
+            {
+                string packageNamespace = purl.Namespace ?? String.Empty;
+                string baseUrl = $"{upstream.GetRepositoryUrl()}{packageNamespace}:{packageName}";
+                html = await GetHttpStringCache(httpClient, baseUrl, useCache);
+            }
+            else // michelleqyun: eventually default to maven central
+            {
+                throw new ArgumentException($"Unexpected upstream: {upstream}");
+            }
+
             if (string.IsNullOrEmpty(html))
             {
                 throw new InvalidOperationException();
@@ -357,26 +432,44 @@ namespace Microsoft.CST.OpenSource.PackageManagers
             HtmlParser parser = new();
             AngleSharp.Html.Dom.IHtmlDocument document = await parser.ParseDocumentAsync(html);
 
-            // Break the version content down into its individual lines, and then find the one that represents the
-            // intended version.
-            string? versionContent = document.QuerySelector("#contents").TextContent
-                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
-                .SingleOrDefault(versionText => versionText.StartsWith($"{packageVersion}/"));
-
-            if (versionContent == null)
+            if (upstream == MavenSupportedUpstream.MavenCentralRepository) // michelleqyun: consider switch statement
             {
-                return null;
+                // Break the version content down into its individual lines, and then find the one that represents the
+                // intended version.
+                string? versionContent = document.QuerySelector("#contents").TextContent
+                    .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                    .SingleOrDefault(versionText => versionText.StartsWith($"{packageVersion}/"));
+
+                if (versionContent == null)
+                {
+                    return null;
+                }
+
+                // Split the version content into its individual parts.
+                // [0] - The version
+                // [1] - The date it was published
+                // [2] - The time it waas published
+                // [3] - The download count
+                string[] versionParts = versionContent.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                if (DateTime.TryParse($"{versionParts[1]} {versionParts[2]}", out DateTime publishDateTime))
+                {
+                    return publishDateTime;
+                }
             }
-
-            // Split the version content into its individual parts.
-            // [0] - The version
-            // [1] - The date it was published
-            // [2] - The time it waas published
-            // [3] - The download count
-            string[] versionParts = versionContent.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-            if (DateTime.TryParse($"{versionParts[1]} {versionParts[2]}", out DateTime publishDateTime))
+            else if (upstream == MavenSupportedUpstream.GoogleMavenRepository)
             {
-                return publishDateTime;
+                // Google Maven Repository offers a "Last Updated Date", which will be considered as the publish timestamp.
+                string? publishTimestamp = document.QuerySelector("Last Updated Date").TextContent;
+                if (DateTime.TryParse($"{publishTimestamp}", out DateTime publishDateTime))
+                {
+                    throw new ArgumentException(publishTimestamp);
+                    
+                    return publishDateTime;
+                }
+            }
+            else // michelleqyun: eventually default to maven central
+            {
+                throw new ArgumentException($"Unexpected upstream: {upstream}");
             }
 
             return null;
