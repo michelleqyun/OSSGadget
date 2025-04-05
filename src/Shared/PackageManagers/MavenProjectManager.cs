@@ -460,6 +460,7 @@ namespace Microsoft.CST.OpenSource.PackageManagers
             {
                 // Google Maven Repository offers a "Last Updated Date", which will be considered as the publish timestamp.
                 string? publishTimestamp = document.QuerySelector("Last Updated Date").TextContent;
+                throw new ArgumentException(publishTimestamp);
                 if (DateTime.TryParse($"{publishTimestamp}", out DateTime publishDateTime))
                 {
                     throw new ArgumentException(publishTimestamp);
