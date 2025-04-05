@@ -10,6 +10,7 @@ namespace Microsoft.CST.OpenSource.PackageManagers
     using Microsoft.CST.OpenSource.Model.Enums;
     using Microsoft.CST.OpenSource.PackageActions;
     using PackageUrl;
+    using PuppeteerSharp;
     using System;
     using System.Collections.Generic;
     using System.IO;
@@ -66,17 +67,17 @@ namespace Microsoft.CST.OpenSource.PackageManagers
                 throw new ArgumentException($"Unexpected upstream: {upstream}");
             }
 
-            string? html = await GetHttpStringCache(httpClient, baseUrl, useCache);
-            if (string.IsNullOrEmpty(html))
-            {
-                throw new InvalidOperationException();
-            }
-
-            HtmlParser parser = new();
-            AngleSharp.Html.Dom.IHtmlDocument document = await parser.ParseDocumentAsync(html);
-
             if (upstream == MavenSupportedUpstream.MavenCentralRepository)
             {
+                string? html = await GetHttpStringCache(httpClient, baseUrl, useCache);
+                if (string.IsNullOrEmpty(html))
+                {
+                    throw new InvalidOperationException();
+                }
+
+                HtmlParser parser = new();
+                AngleSharp.Html.Dom.IHtmlDocument document = await parser.ParseDocumentAsync(html);
+
                 foreach (string fileName in document.QuerySelectorAll("a").Select(link => link.GetAttribute("href").ToString()))
                 {
                     if (fileName == "../") continue;
@@ -85,9 +86,28 @@ namespace Microsoft.CST.OpenSource.PackageManagers
                     yield return new ArtifactUri<MavenArtifactType>(artifactType, baseUrl + fileName);
                 }
             }
-            else if (upstream == MavenSupportedUpstream.GoogleMavenRepository)
+            else if (upstream == MavenSupportedUpstream.GoogleMavenRepository) // michelleqyun: add caching
             {
+                // Google Maven Repository's webpage has dynamic content
+                var browserFetcher = new BrowserFetcher();
+                await browserFetcher.DownloadAsync();
+                var browser = await Puppeteer.LaunchAsync(new LaunchOptions { Headless = true });
+                var page = await browser.NewPageAsync();
+                await page.GoToAsync(baseUrl);
 
+                await page.WaitForSelectorAsync("tr");
+                var pageHeaderHandle = await page.QuerySelectorAsync("tr:nth-child(2) > td:nth-child(2)");
+                var anchors = await pageHeaderHandle.QuerySelectorAllAsync("a");
+
+                foreach (var anchor in anchors)
+                {
+                    var href = await anchor.GetPropertyAsync("href");
+                    var hrefValue = await href.JsonValueAsync<string>();
+                    MavenArtifactType artifactType = GetMavenArtifactType(hrefValue);
+                    yield return new ArtifactUri<MavenArtifactType>(artifactType, hrefValue);
+                }
+
+                await browser.CloseAsync(); // michelleqyun: investigate if this line is always reached
             }
             else // michelleqyun: eventually default to maven central
             {
@@ -406,34 +426,33 @@ namespace Microsoft.CST.OpenSource.PackageManagers
 
             HttpClient httpClient = CreateHttpClient();
 
-            string html = string.Empty;
+            string baseUrl = string.Empty;
             if (upstream == MavenSupportedUpstream.MavenCentralRepository) // michelleqyun: consider switch statement
             {
                 string? packageNamespace = Check.NotNull(nameof(purl.Namespace), purl?.Namespace).Replace('.', '/');
-                string baseUrl = $"{upstream.GetRepositoryUrl().EnsureTrailingSlash()}{packageNamespace}/{packageName}/";
-                html = await GetHttpStringCache(httpClient, baseUrl, useCache);
+                baseUrl = $"{upstream.GetRepositoryUrl().EnsureTrailingSlash()}{packageNamespace}/{packageName}/";
             }
             else if (upstream == MavenSupportedUpstream.GoogleMavenRepository)
             {
                 string packageNamespace = purl.Namespace ?? String.Empty;
-                string baseUrl = $"{upstream.GetRepositoryUrl()}{packageNamespace}:{packageName}";
-                html = await GetHttpStringCache(httpClient, baseUrl, useCache);
+                baseUrl = $"{upstream.GetRepositoryUrl()}{packageNamespace}:{packageName}";
             }
             else // michelleqyun: eventually default to maven central
             {
                 throw new ArgumentException($"Unexpected upstream: {upstream}");
             }
 
-            if (string.IsNullOrEmpty(html))
-            {
-                throw new InvalidOperationException();
-            }
-
-            HtmlParser parser = new();
-            AngleSharp.Html.Dom.IHtmlDocument document = await parser.ParseDocumentAsync(html);
-
             if (upstream == MavenSupportedUpstream.MavenCentralRepository) // michelleqyun: consider switch statement
             {
+                string? html = await GetHttpStringCache(httpClient, baseUrl, useCache);
+                if (string.IsNullOrEmpty(html))
+                {
+                    throw new InvalidOperationException();
+                }
+
+                HtmlParser parser = new();
+                AngleSharp.Html.Dom.IHtmlDocument document = await parser.ParseDocumentAsync(html);
+
                 // Break the version content down into its individual lines, and then find the one that represents the
                 // intended version.
                 string? versionContent = document.QuerySelector("#contents").TextContent
@@ -456,16 +475,30 @@ namespace Microsoft.CST.OpenSource.PackageManagers
                     return publishDateTime;
                 }
             }
-            else if (upstream == MavenSupportedUpstream.GoogleMavenRepository)
+            else if (upstream == MavenSupportedUpstream.GoogleMavenRepository) // michelleqyun: add caching
             {
+                // Google Maven Repository's webpage has dynamic content
+                var browserFetcher = new BrowserFetcher();
+                await browserFetcher.DownloadAsync();
+                var browser = await Puppeteer.LaunchAsync(new LaunchOptions { Headless = true });
+                var page = await browser.NewPageAsync();
+                await page.GoToAsync(baseUrl);
+
                 // Google Maven Repository offers a "Last Updated Date", which will be considered as the publish timestamp.
-                string? publishTimestamp = document.QuerySelector("Last Updated Date").TextContent;
-                throw new ArgumentException(publishTimestamp);
-                if (DateTime.TryParse($"{publishTimestamp}", out DateTime publishDateTime))
-                {
-                    throw new ArgumentException(publishTimestamp);
-                    
+                await page.WaitForSelectorAsync("tr");
+                var pageHeaderHandle = await page.QuerySelectorAsync("tr:nth-child(10) > td:nth-child(2)");
+                var content = await pageHeaderHandle.QuerySelectorAsync("span");
+                var lastUpdatedDate = await content.EvaluateFunctionAsync<string>("el => el.textContent");
+
+                await browser.CloseAsync();
+
+                if (DateTime.TryParse($"{lastUpdatedDate}", out DateTime publishDateTime))
+                {   
                     return publishDateTime;
+                }
+                else
+                {
+                    throw new ArgumentException("Expected a published date time"); // michelleqyun: clean up
                 }
             }
             else // michelleqyun: eventually default to maven central
