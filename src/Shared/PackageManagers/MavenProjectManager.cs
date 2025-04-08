@@ -9,6 +9,8 @@ namespace Microsoft.CST.OpenSource.PackageManagers
     using Microsoft.CST.OpenSource.Model;
     using Microsoft.CST.OpenSource.Model.Enums;
     using Microsoft.CST.OpenSource.PackageActions;
+    using OpenQA.Selenium.Chrome;
+    using OpenQA.Selenium;
     using PackageUrl;
     using PuppeteerSharp;
     using System;
@@ -60,7 +62,7 @@ namespace Microsoft.CST.OpenSource.PackageManagers
             else if (upstream == MavenSupportedUpstream.GoogleMavenRepository)
             {
                 string packageNamespace = purl.Namespace ?? String.Empty;
-                baseUrl = $"{upstream.GetRepositoryUrl().EnsureTrailingSlash()}{packageNamespace}:{packageName}:{purl.Version}";
+                baseUrl = $"{upstream.GetRepositoryUrl()}{packageNamespace}:{packageName}:{purl.Version}";
             }
             else // michelleqyun: eventually default to maven central
             {
@@ -91,13 +93,14 @@ namespace Microsoft.CST.OpenSource.PackageManagers
                 // Google Maven Repository's webpage has dynamic content
                 var browserFetcher = new BrowserFetcher();
                 await browserFetcher.DownloadAsync();
-                var browser = await Puppeteer.LaunchAsync(new LaunchOptions { Headless = true });
+                var browser = await Puppeteer.LaunchAsync(new LaunchOptions { HeadlessMode = HeadlessMode.True });
                 var page = await browser.NewPageAsync();
-                await page.GoToAsync(baseUrl);
+                page.DefaultTimeout = 0;
+                await page.GoToAsync(baseUrl, WaitUntilNavigation.DOMContentLoaded);
 
                 await page.WaitForSelectorAsync("tr");
-                var pageHeaderHandle = await page.QuerySelectorAsync("tr:nth-child(2) > td:nth-child(2)");
-                var anchors = await pageHeaderHandle.QuerySelectorAllAsync("a");
+                var trElement = await page.XPathAsync("//tr[td[contains(text(), 'Artifact(s)')]]");
+                var anchors = await trElement.ElementAt(0).QuerySelectorAllAsync("a");
 
                 foreach (var anchor in anchors)
                 {
@@ -107,7 +110,7 @@ namespace Microsoft.CST.OpenSource.PackageManagers
                     yield return new ArtifactUri<MavenArtifactType>(artifactType, hrefValue);
                 }
 
-                await browser.CloseAsync(); // michelleqyun: investigate if this line is always reached
+                await browser.CloseAsync();
             }
             else // michelleqyun: eventually default to maven central
             {
@@ -346,12 +349,12 @@ namespace Microsoft.CST.OpenSource.PackageManagers
                     if (upstream == MavenSupportedUpstream.MavenCentralRepository) // michelleqyun: consider switch statement
                     {
                         string? packageNamespace = purl?.Namespace?.Replace('.', '/');
-                        return await GetHttpStringCache(httpClient, $"{upstream.GetDownloadRepositoryUrl().EnsureTrailingSlash()}{packageNamespace}/{packageName}/{version}/{packageName}-{version}.pom", useCache);
+                        return await GetHttpStringCache(httpClient, $"{upstream.GetRepositoryUrl().EnsureTrailingSlash()}{packageNamespace}/{packageName}/{version}/{packageName}-{version}.pom", useCache);
                     }
                     else if (upstream == MavenSupportedUpstream.GoogleMavenRepository)
                     {
                         string packageNamespace = purl.Namespace ?? String.Empty;
-                        return await GetHttpStringCache(httpClient, $"{upstream.GetDownloadRepositoryUrl()}{packageNamespace}/{packageName}/{version}/{packageName}-{version}.pom", useCache);
+                        return await GetHttpStringCache(httpClient, $"{upstream.GetRepositoryUrl()}{packageNamespace}:{packageName}:{version}/{version}", useCache);
                     }
                     else // michelleqyun: eventually default to maven central
                     {
@@ -362,7 +365,9 @@ namespace Microsoft.CST.OpenSource.PackageManagers
             catch (Exception ex)
             {
                 Logger.Warn(ex, $"Error fetching Maven metadata: {ex.Message}");
-                return null;
+                throw ex;
+
+                // return null;
             }
         }
 
@@ -417,7 +422,7 @@ namespace Microsoft.CST.OpenSource.PackageManagers
             }
         }
 
-        private async Task<DateTime?> GetPackagePublishDateAsync(PackageURL purl, bool useCache = true)
+        public async Task<DateTime?> GetPackagePublishDateAsync(PackageURL purl, bool useCache = true)
         {
             string? packageName = Check.NotNull(nameof(purl.Name), purl?.Name);
             string? packageVersion = Check.NotNull(nameof(purl.Version), purl?.Version);
@@ -435,7 +440,7 @@ namespace Microsoft.CST.OpenSource.PackageManagers
             else if (upstream == MavenSupportedUpstream.GoogleMavenRepository)
             {
                 string packageNamespace = purl.Namespace ?? String.Empty;
-                baseUrl = $"{upstream.GetRepositoryUrl()}{packageNamespace}:{packageName}";
+                baseUrl = $"{upstream.GetRepositoryUrl()}{packageNamespace}:{packageName}:{packageVersion}";
             }
             else // michelleqyun: eventually default to maven central
             {
@@ -486,14 +491,14 @@ namespace Microsoft.CST.OpenSource.PackageManagers
 
                 // Google Maven Repository offers a "Last Updated Date", which will be considered as the publish timestamp.
                 await page.WaitForSelectorAsync("tr");
-                var pageHeaderHandle = await page.QuerySelectorAsync("tr:nth-child(10) > td:nth-child(2)");
-                var content = await pageHeaderHandle.QuerySelectorAsync("span");
+                var trElement = await page.XPathAsync("//tr[td[contains(text(), 'Last Updated Date')]]");
+                var content = await trElement.ElementAt(0).QuerySelectorAsync("span");
                 var lastUpdatedDate = await content.EvaluateFunctionAsync<string>("el => el.textContent");
 
                 await browser.CloseAsync();
 
                 if (DateTime.TryParse($"{lastUpdatedDate}", out DateTime publishDateTime))
-                {   
+                {
                     return publishDateTime;
                 }
                 else
