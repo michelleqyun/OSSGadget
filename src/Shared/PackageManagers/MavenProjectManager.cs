@@ -9,8 +9,6 @@ namespace Microsoft.CST.OpenSource.PackageManagers
     using Microsoft.CST.OpenSource.Model;
     using Microsoft.CST.OpenSource.Model.Enums;
     using Microsoft.CST.OpenSource.PackageActions;
-    using OpenQA.Selenium.Chrome;
-    using OpenQA.Selenium;
     using PackageUrl;
     using PuppeteerSharp;
     using System;
@@ -328,12 +326,12 @@ namespace Microsoft.CST.OpenSource.PackageManagers
                         if (upstream == MavenSupportedUpstream.MavenCentralRepository) // michelleqyun: consider switch statement
                         {
                             string? packageNamespace = purl?.Namespace?.Replace('.', '/');
-                            return await GetHttpStringCache(httpClient, $"{upstream.GetDownloadRepositoryUrl().EnsureTrailingSlash()}{packageNamespace}/{packageName}/{version}/{packageName}-{version}.pom", useCache);
+                            return await GetHttpStringCache(httpClient, $"{upstream.GetRepositoryUrl().EnsureTrailingSlash()}{packageNamespace}/{packageName}/{version}/{packageName}-{version}.pom", useCache);
                         }
                         else if (upstream == MavenSupportedUpstream.GoogleMavenRepository)
                         {
                             string packageNamespace = purl.Namespace ?? String.Empty;
-                            return await GetHttpStringCache(httpClient, $"{upstream.GetDownloadRepositoryUrl()}{packageNamespace}/{packageName}/{version}/{packageName}-{version}.pom", useCache);
+                            return await GetHttpStringCache(httpClient, $"{upstream.GetRepositoryUrl()}{packageNamespace}:{packageName}", useCache);
                         }
                         else // michelleqyun: eventually default to maven central
                         {
@@ -354,7 +352,7 @@ namespace Microsoft.CST.OpenSource.PackageManagers
                     else if (upstream == MavenSupportedUpstream.GoogleMavenRepository)
                     {
                         string packageNamespace = purl.Namespace ?? String.Empty;
-                        return await GetHttpStringCache(httpClient, $"{upstream.GetRepositoryUrl()}{packageNamespace}:{packageName}:{version}/{version}", useCache);
+                        return await GetHttpStringCache(httpClient, $"{upstream.GetRepositoryUrl()}{packageNamespace}:{packageName}:{version}", useCache);
                     }
                     else // michelleqyun: eventually default to maven central
                     {
@@ -390,11 +388,24 @@ namespace Microsoft.CST.OpenSource.PackageManagers
 
         public override Uri GetPackageAbsoluteUri(PackageURL purl)
         {
-            string? packageNamespace = purl?.Namespace?.Replace('.', '/');
             string? packageName = purl?.Name;
-            string feedUrl = (purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT.GetRepositoryUrl()).EnsureTrailingSlash();
+            string feedUrl = purl?.Qualifiers?["repository_url"] ?? ENV_MAVEN_ENDPOINT.GetRepositoryUrl();
+            MavenSupportedUpstream upstream = feedUrl.GetMavenSupportedUpstream();
 
-            return new Uri($"{feedUrl}{packageNamespace}/{packageName}");
+            if (upstream == MavenSupportedUpstream.MavenCentralRepository) // michelleqyun: consider switch statement
+            {
+                string? packageNamespace = purl?.Namespace?.Replace('.', '/');
+                return new Uri($"{upstream.GetRepositoryUrl().EnsureTrailingSlash()}{packageNamespace}/{packageName}")
+            }
+            else if (upstream == MavenSupportedUpstream.GoogleMavenRepository)
+            {
+                string packageNamespace = purl.Namespace ?? String.Empty;
+                return new Uri($"{upstream.GetRepositoryUrl()}{packageNamespace}/{packageName}");
+            }
+            else // michelleqyun: eventually default to maven central
+            {
+                throw new ArgumentException($"Unexpected upstream: {upstream}");
+            }
         }
 
         public enum MavenArtifactType
@@ -406,6 +417,7 @@ namespace Microsoft.CST.OpenSource.PackageManagers
             SourcesJar,
             TestsJar,
             TestSourcesJar,
+            Aar,
         }
 
         private static MavenArtifactType GetMavenArtifactType(string fileName)
@@ -418,6 +430,7 @@ namespace Microsoft.CST.OpenSource.PackageManagers
                 case string _ when fileName.EndsWith(".pom"): return MavenArtifactType.Pom;
                 case string _ when fileName.EndsWith("-javadoc.jar"): return MavenArtifactType.JavadocJar;
                 case string _ when fileName.EndsWith(".jar"): return MavenArtifactType.Jar;
+                case string _ when fileName.EndsWith(".aar"): return MavenArtifactType.Aar;
                 default: return MavenArtifactType.Unknown;
             }
         }
@@ -500,10 +513,6 @@ namespace Microsoft.CST.OpenSource.PackageManagers
                 if (DateTime.TryParse($"{lastUpdatedDate}", out DateTime publishDateTime))
                 {
                     return publishDateTime;
-                }
-                else
-                {
-                    throw new ArgumentException("Expected a published date time"); // michelleqyun: clean up
                 }
             }
             else // michelleqyun: eventually default to maven central
